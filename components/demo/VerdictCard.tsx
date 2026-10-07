@@ -13,15 +13,25 @@ function Field({ label, children, mono }: { label: string; children: React.React
   return (
     <div>
       <dt className="text-[11px] font-semibold uppercase tracking-widest text-zinc-500">{label}</dt>
-      <dd className={`mt-0.5 text-sm text-zinc-100 ${mono ? "font-mono" : ""}`}>{children}</dd>
+      <dd className={`mt-0.5 break-words text-sm text-zinc-100 ${mono ? "font-mono" : ""}`}>{children}</dd>
     </div>
   );
 }
 
+const EXECUTION: Record<Verdict["decision"], string> = {
+  ALLOW: "Tool call permitted to execute (simulated).",
+  WARN: "Tool call held. It will not run until the user explicitly confirms.",
+  BLOCK: "Tool call stopped at the gateway. It was never executed.",
+};
+
 export function VerdictCard({ verdict }: { verdict: Verdict }) {
   const s = DECISION_STYLES[verdict.decision];
   return (
-    <section className={`rounded-xl border ${s.border} ${s.bg} p-5`}>
+    <section
+      className={`animate-fade-up rounded-xl border ${s.border} ${s.bg} p-5 ${
+        verdict.decision === "BLOCK" ? "animate-block-glow" : ""
+      }`}
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <DecisionBadge decision={verdict.decision} size="lg" />
         <div className="text-right">
@@ -34,8 +44,10 @@ export function VerdictCard({ verdict }: { verdict: Verdict }) {
       </div>
 
       <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
-        <div className={`h-full ${s.bar}`} style={{ width: `${verdict.riskScore}%` }} />
+        <div className={`h-full ${s.bar} transition-[width] duration-700 ease-out`} style={{ width: `${verdict.riskScore}%` }} />
       </div>
+
+      <p className={`mt-3 text-sm font-medium ${s.text}`}>{EXECUTION[verdict.decision]}</p>
 
       {verdict.escalatedByGemma && (
         <p className="mt-3 text-xs text-violet-300">
@@ -70,7 +82,7 @@ export function VerdictCard({ verdict }: { verdict: Verdict }) {
 
       <div className="mt-5">
         <div className="text-[11px] font-semibold uppercase tracking-widest text-zinc-500">Why it is dangerous</div>
-        <ul className="mt-1.5 list-disc space-y-1 pl-5 text-sm text-zinc-200">
+        <ul className="mt-1.5 list-disc space-y-1 break-words pl-5 text-sm text-zinc-200">
           {verdict.whyDangerous.map((w, i) => (
             <li key={i}>{w}</li>
           ))}

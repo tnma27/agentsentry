@@ -5,7 +5,7 @@ import { RULE_WEIGHTS } from "@/lib/security/config";
 export function RuleList({ engine }: { engine: EngineResult }) {
   return (
     <section className="rounded-xl border border-white/10 bg-white/[0.02] p-5">
-      <div className="mb-3 flex items-baseline justify-between">
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-500">Deterministic rules</h2>
         <span className="font-mono text-xs text-zinc-500">
           engine: {engine.decision} · {engine.riskScore}/100
@@ -32,7 +32,7 @@ export function RuleList({ engine }: { engine: EngineResult }) {
               </span>
             </div>
             {r.triggered && r.evidence.length > 0 && (
-              <ul className="mt-1.5 space-y-0.5 pl-6 font-mono text-xs text-zinc-400">
+              <ul className="mt-1.5 space-y-0.5 break-words pl-6 font-mono text-xs text-zinc-400">
                 {r.evidence.map((e, i) => (
                   <li key={i}>{e}</li>
                 ))}

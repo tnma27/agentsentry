@@ -1,5 +1,5 @@
 import { Sparkles } from "lucide-react";
-import type { GemmaResult } from "@/lib/types";
+import type { Decision, GemmaResult, Verdict } from "@/lib/types";
 import { DecisionBadge } from "./DecisionBadge";
 
 const STATUS_TEXT: Record<GemmaResult["status"], string> = {
@@ -10,9 +10,12 @@ const STATUS_TEXT: Record<GemmaResult["status"], string> = {
   error: "Error: deterministic engine only",
 };
 
-export function GemmaPanel({ gemma }: { gemma: GemmaResult }) {
+const RANK: Record<Decision, number> = { ALLOW: 0, WARN: 1, BLOCK: 2 };
+
+export function GemmaPanel({ gemma, verdict }: { gemma: GemmaResult; verdict: Verdict }) {
   const ok = gemma.status === "ok" && gemma.output;
   const o = gemma.output;
+  const overruled = o !== null && RANK[o.recommendedDecision] < RANK[verdict.decision];
 
   return (
     <section className="rounded-xl border border-violet-500/25 bg-violet-500/[0.04] p-5">
@@ -66,13 +69,34 @@ export function GemmaPanel({ gemma }: { gemma: GemmaResult }) {
               <p className="mt-0.5 text-zinc-200">{o.attackerGoal}</p>
             </div>
           )}
+          {overruled && (
+            <p className="rounded-md border border-white/10 bg-black/30 px-3 py-2 text-xs text-zinc-300">
+              Gemma recommended {o.recommendedDecision}, but the deterministic {verdict.decision} stands. Gemma cannot
+              downgrade a security verdict.
+            </p>
+          )}
+          {verdict.escalatedByGemma && (
+            <p className="rounded-md border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-xs text-violet-200">
+              Gemma escalated the verdict from {verdict.engineDecision} to {verdict.decision}.
+            </p>
+          )}
           <p className="text-xs text-zinc-500">Advisory only. Gemma can raise the decision but can never lower it.</p>
         </div>
       ) : (
-        <p className="text-sm text-zinc-400">
-          The verdict above comes from the deterministic engine alone.
-          {gemma.error ? <span className="mt-1 block font-mono text-xs text-zinc-500">{gemma.error}</span> : null}
-        </p>
+        <div className="space-y-2 text-sm text-zinc-400">
+          <p className="text-zinc-300">
+            {gemma.status === "unavailable"
+              ? "Contextual Gemma analysis is unavailable (no GEMINI_API_KEY configured on the server)."
+              : "Contextual Gemma analysis could not be completed for this request."}
+          </p>
+          <p>
+            The {verdict.decision} verdict was produced by the deterministic engine alone. Hard security decisions never
+            depend on the LLM.
+          </p>
+          {gemma.error && gemma.status !== "unavailable" ? (
+            <p className="font-mono text-xs text-zinc-500">{gemma.error}</p>
+          ) : null}
+        </div>
       )}
     </section>
   );
