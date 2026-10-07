@@ -35,7 +35,7 @@ export function VerdictCard({ verdict }: { verdict: Verdict }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <DecisionBadge decision={verdict.decision} size="lg" />
         <div className="text-right">
-          <div className="text-[11px] font-semibold uppercase tracking-widest text-zinc-500">Risk score</div>
+          <div className="text-[11px] font-semibold uppercase tracking-widest text-zinc-500">Deterministic risk score</div>
           <div className={`font-mono text-3xl font-bold ${s.text}`}>
             {verdict.riskScore}
             <span className="text-base text-zinc-500">/100</span>

@@ -22,6 +22,9 @@ export function GemmaPanel({ gemma, verdict }: { gemma: GemmaResult; verdict: Ve
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-violet-300">
           <Sparkles className="h-3.5 w-3.5" aria-hidden /> Gemma contextual analysis
+          <span className="rounded border border-violet-500/30 px-1.5 py-px text-[10px] normal-case tracking-normal text-violet-300/80">
+            AI · advisory
+          </span>
         </h2>
         <span
           className={`rounded-md border px-2 py-0.5 font-mono text-xs ${
