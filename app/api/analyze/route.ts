@@ -3,12 +3,15 @@
 // 1. validate input  2. deterministic engine (authoritative)
 // 3. Gemma (advisory, escalate-only)  4. merged verdict
 
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { randomUUID } from "crypto";
 import type { AnalyzeError, AnalyzeRequest, AnalyzeResponse, ToolName } from "@/lib/types";
 import { evaluateAction } from "@/lib/security/engine";
 import { buildVerdict } from "@/lib/security/verdict";
 import { analyzeWithGemma } from "@/lib/gemma/client";
+import { snowflakeConfigured } from "@/lib/snowflake/client";
+import { logDecisionEvent } from "@/lib/snowflake/store";
+import { rateLimited } from "@/lib/http/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,6 +54,8 @@ function validate(body: unknown): AnalyzeRequest | string {
 }
 
 export async function POST(req: Request) {
+  // Each request can call Gemma; keep one client from exhausting the quota.
+  if (rateLimited(req, "analyze", 40)) return NextResponse.json<AnalyzeError>({ error: "Too many requests. Please wait a minute." }, { status: 429 });
   let body: unknown;
   try {
     body = await req.json();
@@ -78,5 +83,12 @@ export async function POST(req: Request) {
     engine,
     gemma,
   };
+  // Best-effort audit log to Snowflake after the response is sent; never affects the decision.
+  if (snowflakeConfigured()) {
+    const v = response.verdict;
+    after(() =>
+      logDecisionEvent({ sourceType: "agent_action", source: "Agent Security Lab", threatType: v.threatType, decision: v.decision, riskScore: v.riskScore, action: v.requestedAction }).catch(() => {}),
+    );
+  }
   return NextResponse.json<AnalyzeResponse>(response);
 }

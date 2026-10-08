@@ -2,11 +2,15 @@
 // OPTIONAL: limited security analysis of a PUBLIC GitHub repository's README (+ root manifests).
 // Repository content is real and UNTRUSTED. The agent action is simulated. The gateway decision is real.
 
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { parseGitHubRepoUrl } from "@/lib/repo/url";
 import { ScanError, fetchExtras, fetchReadme, fetchRepoInfo } from "@/lib/repo/github";
 import { analyzeRepository } from "@/lib/repo/scan";
 import type { ScanRepoError, ScanRepoResponse } from "@/lib/repo/types";
+import { snowflakeConfigured } from "@/lib/snowflake/client";
+import { logDecisionEvent } from "@/lib/snowflake/store";
+import { formatAction } from "@/lib/security/verdict";
+import { rateLimited } from "@/lib/http/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +20,8 @@ function fail(code: ScanRepoError["code"], error: string, status: number) {
 }
 
 export async function POST(req: Request) {
+  // Protects the shared, unauthenticated GitHub API quota (60 requests/hour per server IP).
+  if (rateLimited(req, "scan-repo", 15)) return fail("bad_request", "Too many repository scans. Please wait a minute.", 429);
   let body: unknown;
   try {
     body = await req.json();
@@ -32,6 +38,12 @@ export async function POST(req: Request) {
     const repo = await fetchRepoInfo(ref);
     const [readme, extras] = await Promise.all([fetchReadme(repo), fetchExtras(repo)]);
     const result = await analyzeRepository(repo, [readme, ...extras.files], extras.skipped);
+    if (snowflakeConfigured()) {
+      const v = result.verdict;
+      after(() =>
+        logDecisionEvent({ sourceType: "repository", source: result.repo.fullName, threatType: v.threatType, decision: v.decision, riskScore: v.riskScore, action: formatAction(result.simulatedAction) }).catch(() => {}),
+      );
+    }
     return NextResponse.json<ScanRepoResponse>(result);
   } catch (err) {
     if (err instanceof ScanError) return fail(err.code, err.message, err.status);

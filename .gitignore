@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+snowflake_key.p8
+snowflake_key.pub
+snowflake.log

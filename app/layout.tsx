@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Instrument_Serif } from "next/font/google";
 import "./globals.css";
+import { SiteNav } from "@/components/site/SiteNav";
+import { SiteFooter } from "@/components/site/SiteFooter";
+import { ScanStoreProvider } from "@/lib/state/scan-store";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -12,10 +15,17 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const instrumentSerif = Instrument_Serif({
+  variable: "--font-instrument-serif",
+  subsets: ["latin"],
+  weight: "400",
+  style: ["normal", "italic"],
+});
+
 export const metadata: Metadata = {
-  title: "AgentSentry: Security for AI agents before they act",
+  title: { default: "AgentSentry 2.0 — Detect. Explain. Fix. Monitor.", template: "%s · AgentSentry" },
   description:
-    "AgentSentry is a security gateway that evaluates proposed AI-agent tool actions before execution, using deterministic policies plus contextual Gemma analysis.",
+    "AgentSentry is a security operations studio: passive website scanning, Gemma-powered remediation, Snowflake-backed history, and security for AI agents and repositories.",
 };
 
 export default function RootLayout({
@@ -24,11 +34,19 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col">{children}</body>
+    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} ${instrumentSerif.variable} h-full antialiased`}>
+      <body className="flex min-h-full flex-col bg-ivory text-ink">
+        <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-ink focus:px-3 focus:py-2 focus:text-ivory">
+          Skip to content
+        </a>
+        <ScanStoreProvider>
+          <SiteNav />
+          <main id="main" className="flex-1">
+            {children}
+          </main>
+          <SiteFooter />
+        </ScanStoreProvider>
+      </body>
     </html>
   );
 }

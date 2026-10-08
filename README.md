@@ -1,78 +1,118 @@
-# AgentSentry
+# AgentSentry 2.0
 
-**Security for AI agents before they act.**
+**Detect. Explain. Fix. Monitor.**
 
-AI agents increasingly read untrusted external content (READMEs, web pages, issues, emails) and then call tools. A malicious instruction hidden in that content can be mistaken for a legitimate goal: this is **indirect prompt injection** (OWASP LLM01 / ASI01 Agent Goal Hijack).
+AgentSentry is a security operations studio. It passively scans public websites for observable configuration weaknesses, uses **Google Gemma** to explain each finding and suggest an evidence-grounded fix, stores scan history and remediation status in **Snowflake**, and proves fixes with a rescan. It also keeps the original **AI-agent security gateway** (SAFE / WARN / ATTACK) and the **public GitHub repository** prompt-injection analysis.
 
-AgentSentry is a security gateway that sits between an agent and its tools. Every **proposed** tool call is evaluated **before execution** and is either **ALLOWED**, **held for confirmation (WARN)**, or **BLOCKED**.
+> **Honesty notes**
+> - Website scans are **passive**: ordinary GET requests to one page on ports 80/443. No exploitation, brute force, form submission or port scanning. A clean scan does **not** prove a site is free of vulnerabilities.
+> - Gemma is **advisory**. Findings and scores come from deterministic code; Gemma never removes a finding or lowers an agent-security verdict.
+> - Marking a fix as *applied* is a claim. Only a **rescan** that no longer observes the issue records it as **verified resolved**.
+> - In the Agent Security Lab, the agent, repository files and tools are **simulations**; the gateway deciding on them is real.
 
-> **Honesty note:** In this hackathon demo, the AI agent, the repository files and the tools are **safe simulations** (in-memory only). The AgentSentry gateway, the deterministic risk engine and the decision logic are **real code**, evaluated live on every request. No real files, secrets or shell commands are ever touched.
+## Pages
 
-## How it works
+| Route | What it does |
+| --- | --- |
+| `/` | Product story and entry points |
+| `/dashboard` | Live posture from Snowflake: latest scan per site, open findings, verified fixes, quick actions |
+| `/scan` | Passive website scanner (public URL or the built-in demo fixture) with rescan comparison |
+| `/fix` | AI Fix Studio: Gemma explanation, platform-specific code, before/after, verification; record proposed/applied; rescan to verify |
+| `/monitor` | Monitoring: sites, last scan, new / resolved / repeated / recurring findings, history, manual rescan, scheduled-rescan status |
+| `/intelligence` | Snowflake analytics: severity, frequent findings, per-site risk trends, remediation pipeline, recurring findings, recent events |
+| `/repositories` | Public GitHub repository analysis (README + root manifests as untrusted content) |
+| `/agents` | Agent Security Lab: SAFE / WARN / ATTACK presets with decision trace (`/demo` redirects here) |
+| `/how-it-works` | Interactive architecture and trust boundaries |
+| `/fixture` | Raw response of the demo fixture (`/fixture?on=hsts,csp,...`) |
+
+## The Detect → Fix → Verify demo
+
+1. Open `/scan?fixture=1`, press **Reset to insecure**, then **Scan demo fixture** (≈12 findings, risk 95, saved to Snowflake).
+2. Expand a finding → **Open in AI Fix Studio** → **Generate fix with Gemma** (~10–15 s).
+3. **Mark applied** (recorded in Snowflake as an unverified claim).
+4. **Enable “…”** applies the matching control to the fixture (it changes the fixture's real response headers).
+5. **Rescan fixture** → *Verified resolved*; `/scan` shows the before/after comparison, `/monitor` and `/intelligence` show the history.
+
+The **demo fixture** is a deliberately misconfigured test site built into AgentSentry, scanned in-process with exactly the same checks as public sites. It exists so the loop can be demonstrated without touching anyone else's website.
+
+## Website checks
+
+HTTPS availability & certificate validity · HTTP → HTTPS redirect · HSTS presence and max-age · Content-Security-Policy presence, `unsafe-inline`, `unsafe-eval`, wildcard sources · X-Content-Type-Options · Referrer-Policy · framing protection (X-Frame-Options / `frame-ancestors`) · Permissions-Policy · cookie Secure / HttpOnly / SameSite (names only, never values) · Server version and X-Powered-By disclosure · CORS wildcard with credentials.
+
+Every finding has: name, severity, observed evidence, why it matters, remediation, and verification guidance.
+**Risk score** = sum of finding weights (high 25, medium 12, low 5, info 0), capped at 100.
+
+### SSRF protection
+
+- Only `http`/`https`, ports 80/443, no credentials in URLs.
+- Refuses `localhost`, `.local`/`.internal`/… names, metadata hostnames, and private, loopback, link-local (incl. `169.254.169.254`), CGNAT, multicast, reserved and documentation IPv4/IPv6 ranges, including IPv4-mapped IPv6 and decimal/hex IP forms.
+- DNS is resolved **at connect time** and every address is checked (defeats DNS rebinding).
+- Redirects are followed manually (max 5) and each hop is re-validated; a redirect to an internal destination stops the scan.
+- 8 s per request, 25 s per scan, 256 KB body cap, no cookies sent, per-IP rate limit.
+
+## Snowflake
+
+Key-pair (JWT) authentication; credentials and the private key are read only on the server. All SQL is parameterized; queries have row limits and a statement timeout; all timestamps are written in UTC from the app clock.
+
+Schema (migration `snowflake/migrations/001_scan_history.sql`, non-destructive):
+
+- `SECURITY_EVENTS` (existing) + `SCAN_ID`, `FINDING_KEY`, `TITLE` — one row per finding per scan, plus agent/repository decisions.
+- `SCANS` — one summary row per website scan.
+- `REMEDIATIONS` — append-only status log: `proposed`, `applied` (user claims) and `verified_resolved` (written only by a rescan).
+- Migration `002_scan_trigger.sql` adds `SCANS.SCAN_TRIGGER` (`manual` | `scheduled`).
+
+Reads used by the Dashboard, Monitor and Intelligence pages are cached for 15 s per server instance and cleared on every write.
+
+## Scheduled monitoring
+
+`GET /api/cron/rescan` rescans up to **2** previously scanned public websites per run (never the fixture), least recently scanned first, through the same SSRF-guarded scanner, and stores them with `SCAN_TRIGGER = 'scheduled'`.
+
+- Disabled unless `CRON_SECRET` (16+ characters) is set; callers must send `Authorization: Bearer <CRON_SECRET>`. Vercel Cron sends this header automatically.
+- `vercel.json` schedules it daily at 06:00 UTC (compatible with the Vercel Hobby tier). Locally nothing calls it on a schedule.
+- A site is due when its latest scan is older than 12 h (`SCHEDULED_RESCAN_MIN_AGE_HOURS` overrides).
+- `/monitor` shows when the endpoint last actually produced a scan, and warns if that was more than 36 h ago. It never claims scheduling is active without a stored scheduled scan.
+
+Never stored: response bodies, cookie values, API keys, private keys or credentials.
+
+**Least privilege:** run `snowflake/setup_least_privilege.sql` as an administrator, then set `SNOWFLAKE_ROLE=AGENTSENTRY_APP`. Until then the UI shows a warning when the session uses an admin role.
+
+## Configuration (`.env.local`, never committed)
 
 ```
-proposed tool call ──► Deterministic policy engine (authoritative) ──┐
-                   └─► Gemma contextual analysis (advisory)  ────────┴─► escalate-only merge ──► ALLOW / WARN / BLOCK
+GEMINI_API_KEY=...
+SNOWFLAKE_ACCOUNT=...
+SNOWFLAKE_USERNAME=...
+SNOWFLAKE_DATABASE=AGENTSENTRY_DB
+SNOWFLAKE_SCHEMA=PUBLIC
+SNOWFLAKE_WAREHOUSE=AGENTSENTRY_WH
+SNOWFLAKE_PRIVATE_KEY_PATH=snowflake_key.p8   # or SNOWFLAKE_PRIVATE_KEY for hosted deployments
+SNOWFLAKE_ROLE=AGENTSENTRY_APP                 # recommended, after running the least-privilege SQL
+CRON_SECRET=<random 32+ chars>                 # optional: enables /api/cron/rescan
 ```
 
-1. **Deterministic engine** (`lib/security/engine.ts`, `lib/security/config.ts`): six explainable rules, each with evidence and OWASP mapping:
+No variable uses the `NEXT_PUBLIC_` prefix; nothing secret reaches the browser. If Gemma or Snowflake is unavailable, scanning still works and the UI says exactly what is unavailable.
 
-   | Rule | Weight |
-   | --- | --- |
-   | Sensitive resource access (`.env`, keys, credentials) | 40 |
-   | Instruction from untrusted content (provenance) | 25 |
-   | Action does not match user intent (least privilege) | 20 |
-   | Prompt-injection indicators in content | 15 |
-   | External data transmission | 30 |
-   | Destructive action | 35 |
-
-   Score ≥ 30 = WARN, ≥ 70 = BLOCK. **Hard rule:** untrusted content may never trigger sensitive, external or destructive actions; that is always BLOCK, whatever the score.
-
-2. **Gemma** (`lib/gemma/`, model `gemma-4-26b-a4b-it` via the Gemini API): reads the untrusted content strictly as data and returns structured JSON with whether injection is present, the extracted malicious instruction, the likely attacker goal, intent alignment, a recommendation and an explanation. Output is schema-validated.
-
-3. **Merge** (`lib/security/verdict.ts`): Gemma may **escalate** a verdict (only with ≥ 0.7 confidence and evidence of injection or misalignment). It can **never downgrade** one. A deterministic BLOCK plus a Gemma ALLOW is still a BLOCK.
-
-If `GEMINI_API_KEY` is missing, or Gemma times out (8 s), errors or returns invalid output, the deterministic verdict stands and the UI shows that contextual analysis was unavailable.
-
-## Demo scenarios
-
-The user request is always: *"Analyze this repository and summarize what it does."*
-
-| Scenario | Agent proposes | Origin | Score | Decision |
-| --- | --- | --- | --- | --- |
-| Safe | `read_file("package.json")` | User request | 0 | ALLOW |
-| Suspicious setup | `run_command("npm install && npm run build")` | README.md | 45 | WARN |
-| Indirect prompt injection | `read_file(".env")` | Hidden HTML comment in README.md | 100 | BLOCK |
-
-## Running locally
+## Run locally
 
 ```bash
 npm install
-npm run dev
+node scripts/snowflake-migrate.mjs snowflake/migrations/001_scan_history.sql   # once
+node scripts/snowflake-migrate.mjs snowflake/migrations/002_scan_trigger.sql    # once
+npm run dev          # or: npm run build && npm start
 ```
 
-Open http://localhost:3000 (landing page) and http://localhost:3000/demo (live demo).
+Open http://localhost:3000.
 
-Optional, to enable Gemma analysis, create `.env.local`:
+## Tests
 
+```bash
+npm run build && npm start                     # terminal 1
+node scripts/test-api.mjs http://localhost:3000   # terminal 2 (add --offline to skip internet-dependent tests)
+# set CRON_SECRET in both terminals to also exercise the scheduled-rescan endpoint
 ```
-GEMINI_API_KEY=your-key-here
-```
 
-The key is read only on the server (`app/api/analyze/route.ts`) and is never sent to the browser.
+Covers: request timeouts and redirect-chain limits, cron endpoint authentication, agent preset regression (engine SAFE 0 / WARN 45 / ATTACK 100, Gemma never lowers), SSRF blocking (private IPs, DNS-to-loopback, unsafe redirects, ports, schemes), fixture detect → fix → rescan diffs, public scans, Gemma remediation (or honest failure), remediation status rules, Snowflake monitor/intelligence, repository scanner.
 
-## API
+## Agent security gateway (unchanged)
 
-`POST /api/analyze` with `{ userRequest, files: [{ path, content, trust }], proposedAction: { tool, target, origin } }` returns `{ eventId, timestamp, verdict, engine, gemma }`. See `lib/types.ts` for the full contract.
-
-## Project layout
-
-```
-app/page.tsx              Landing page
-app/demo/page.tsx         Interactive demo (timeline, attack path, verdict, events)
-app/api/analyze/route.ts  Security gateway endpoint
-lib/security/             Deterministic engine, rule config, verdict merge
-lib/gemma/                Gemma client, prompt and output schema
-lib/scenarios/            Simulated SAFE / WARN / ATTACK scenarios
-components/demo/          Demo UI components
-```
+Deterministic engine (`lib/security/`) with six weighted rules and a hard rule (untrusted content may never trigger sensitive, external or destructive actions), plus Gemma contextual analysis that may **escalate** but never **downgrade**. Preset engine scores: SAFE → ALLOW 0, WARN → WARN 45, ATTACK → BLOCK 100. With Gemma enabled, Gemma escalates the WARN preset's final verdict to BLOCK (engine score stays 45).

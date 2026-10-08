@@ -13,6 +13,7 @@ import {
   buildGemmaPrompt,
   parseGemmaOutput,
 } from "./schema";
+import { logServerError } from "@/lib/http/sanitize";
 
 function fail(status: GemmaStatus, started: number, error: string): GemmaResult {
   return { status, model: GEMMA_MODEL, latencyMs: Date.now() - started, output: null, error };
@@ -61,8 +62,9 @@ export async function analyzeWithGemma(input: GemmaInput): Promise<GemmaResult> 
     return { status: "ok", model: GEMMA_MODEL, latencyMs: Date.now() - started, output, error: null };
   } catch (err) {
     if (controller.signal.aborted) return fail("timeout", started, `No response within ${GEMMA_TIMEOUT_MS} ms.`);
-    const message = err instanceof Error ? err.message : String(err);
-    return fail("error", started, message.slice(0, 300));
+    // Clients get a status-only message; the redacted API detail goes to the server log.
+    logServerError("gemma:analyze", err);
+    return fail("error", started, err instanceof ApiError ? `Gemma API error (HTTP ${err.status}).` : "Gemma request failed.");
   } finally {
     clearTimeout(timer);
   }
